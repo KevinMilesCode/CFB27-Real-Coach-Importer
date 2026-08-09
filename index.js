@@ -90,7 +90,7 @@ async function main() {
       if (exact) {
         console.log(`${c.dim}Schema: ${expected.major}_${expected.minor} (exact match)${c.reset}\n`);
       } else {
-        console.log(`${c.dim}Schema: save reports ${expected.major}_${expected.minor}; using newest bundled schema ${name} (CFB27 layouts are stable across patches).${c.reset}\n`);
+        console.log(`${c.dim}Schema: save reports ${expected.major}_${expected.minor}; using the closest bundled schema at or below it, ${name}.${c.reset}\n`);
       }
     },
   });

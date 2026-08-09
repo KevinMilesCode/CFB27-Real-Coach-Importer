@@ -11,18 +11,55 @@ const fs = require('fs');
 const SCHEMA_DIR = process.env.RG_SCHEMA_DIR || path.resolve(__dirname, 'schema');
 
 /**
- * Choose a schema file for a save. Prefer an exact version match
- * (CFB27_<major>_<minor>.gz or C27_<major>_<minor>.gz); otherwise fall back to the
- * newest schema in the folder, preferring the CFB27_* naming (full merged schema)
- * over C27_* by prefix before breaking ties by modification time.
+ * Full save schemas in SCHEMA_DIR matching `prefix`, as {name, major, minor},
+ * sorted newest-first. Versions come from the FILENAME, not the schema's own
+ * internal dataMajorVersion — the two counters differ (CFB27_833_0.gz is
+ * internally 486_1), and it's the save-stamped number that drives selection.
  *
- * A save's reported version (e.g. 814) is a build number that bumps with every game
- * patch, but the CFB27 table layouts this tool reads/writes are stable across those
- * patches — verified: an 809 save parses byte-identically under the 809 and 472
- * schemas (coach/team/CareerCoachStats all match). So one bundled schema safely
- * handles saves whose exact build number we don't ship a file for. (We still supply
- * the path explicitly, because madden-franchise's built-in picker silently falls
- * back to an unrelated Madden/old-CFB schema, which mis-parses.)
+ * The \d+ immediately after the prefix keeps FTC-tagged files (CFB27_FTC_*)
+ * out of save selection by construction: those are mod-build schemas, never
+ * save schemas.
+ */
+function schemaVersionsIn(prefix) {
+  let files = [];
+  try { files = fs.readdirSync(SCHEMA_DIR); } catch { return []; }
+  const re = new RegExp(`^${prefix}_(\\d+)_(\\d+)\\.gz$`, 'i');
+  const out = [];
+  for (const f of files) {
+    const m = re.exec(f);
+    if (m) out.push({ name: f, major: parseInt(m[1], 10), minor: parseInt(m[2], 10) });
+  }
+  return out.sort((a, b) => b.major - a.major || b.minor - a.minor);
+}
+
+/**
+ * Choose a schema file for a save. Prefer an exact version match
+ * (CFB27_<major>_<minor>.gz or C27_<major>_<minor>.gz); otherwise the NEWEST
+ * full CFB27_* schema whose version is <= the version the save declares; if
+ * every bundled schema is newer than the save, the oldest bundled one (nearest
+ * above). C27_* is consulted only when no CFB27_* file is present.
+ *
+ * The "<= declared" bound is load-bearing, not a tidiness preference. Through
+ * the 814 patch, CFB27 table layouts really were stable across game builds (an
+ * 809 save parses byte-identically under the 809 and 472 schemas), so "newest
+ * bundled" was a safe fallback. THE 2026-08-06 PATCH BROKE THAT. Saves written
+ * by the patched game declare 833, and the Coach table's layout is incompatible
+ * in BOTH directions — measured: 472 reads zero named Coach fields on an 833
+ * save, and the 833 schema reads zero named Coach fields on an 814 save (the
+ * table's embedded schema hash no longer matches, so madden-franchise silently
+ * regenerates a generic Field_N schema for it). Since this tool's entire job is
+ * the Coach table, "newest wins" would have quietly broken every pre-patch save
+ * the moment 833 was bundled. So an 809/814 save must resolve to 472 even
+ * though 833 is newer, and an 833+ save to 833. A future 840 patch then
+ * resolves to 833 automatically, with no code change.
+ *
+ * We still supply the path explicitly, because madden-franchise's built-in
+ * picker silently falls back to an unrelated Madden/old-CFB schema, which
+ * mis-parses.
+ *
+ * Facts + measurement trail:
+ * ../CFB27-Modding-Knowledge/knowledge/save-format/schema-and-versions.md.
+ * Kept in lockstep with the Dynasty Engine's app/src/saveio/cfb27/schema.ts.
  *
  * Returns { path, exact, name }.
  */
@@ -31,21 +68,20 @@ function schemaFileFor(meta) {
     const p = path.join(SCHEMA_DIR, name);
     if (fs.existsSync(p)) return { path: p, exact: true, name };
   }
-  let files = [];
-  try { files = fs.readdirSync(SCHEMA_DIR).filter((f) => /\.gz$/i.test(f)); } catch {}
-  if (files.length) {
-    // Prefer CFB27_* (the full merged schema) over C27_* (older/partial naming) by
-    // prefix, then newest by modification time within that group — mtime alone isn't
-    // reliable (a git checkout or zip re-extract can reorder timestamps).
-    const pick = (pattern) => files
-      .filter((f) => pattern.test(f))
-      .map((f) => ({ f, t: fs.statSync(path.join(SCHEMA_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.t - a.t)[0];
-    const newest = pick(/^CFB27_/) || pick(/^C27_/) || pick(/./);
-    return { path: path.join(SCHEMA_DIR, newest.f), exact: false, name: newest.f };
+  for (const prefix of ['CFB27', 'C27']) {
+    const all = schemaVersionsIn(prefix);
+    if (!all.length) continue;
+    // Compare the (major, minor) PAIR, not major alone: a same-major
+    // higher-minor schema is still newer than the save declares, and the point
+    // of the bound is never handing a save a layout newer than itself.
+    const atOrBelow = all.find(
+      (s) => s.major < meta.major || (s.major === meta.major && s.minor <= meta.minor),
+    ); // list is newest-first, so the first hit is the closest at-or-below
+    const chosen = atOrBelow || all[all.length - 1];
+    return { path: path.join(SCHEMA_DIR, chosen.name), exact: false, name: chosen.name };
   }
   throw new Error(
-    `No schema files found in "${SCHEMA_DIR}".\n`
+    `No CFB27 schema files found in "${SCHEMA_DIR}".\n`
     + `The "schema" folder must sit next to Real-Coaches.exe. If it's missing, re-download the release zip.`,
   );
 }
@@ -134,7 +170,7 @@ async function followStatsRef(file, ref, expectedUniqueId) {
 const sf = (rec, field) => { try { return rec[field]; } catch { return undefined; } };
 
 module.exports = {
-  openSave, tableByUniqueId, readTable, parseRef, followStatsRef, sf,
+  openSave, schemaFileFor, tableByUniqueId, readTable, parseRef, followStatsRef, sf,
   SCHEMA_DIR, TABLE_UNIQUE_ID,
   CAREER_COACH_STATS_UID: TABLE_UNIQUE_ID.careerCoachStats,
   SEASON_COACH_STATS_UID: TABLE_UNIQUE_ID.seasonCoachStats,

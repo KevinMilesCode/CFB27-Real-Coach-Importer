@@ -61,9 +61,10 @@ Documents), lists your dynasty saves, and lets you pick one by number.
 4. Saves everything to a **new copy** named `<yoursave>-REALCOACHES`. Your
    original save is never touched — load the copy in the game.
 
-The game **schema is auto-selected** from each save (falling back to the newest
-bundled schema for versions it doesn't recognize), so the tool works across game
-patches without needing an update for every new patch.
+The game **schema is auto-selected** to match the game build each save was written
+by. Schemas for both the current (August 2026) patch and earlier builds ship in the
+zip, so saves from either era work with no manual setup — **you never need to swap a
+schema file in yourself.**
 
 ## Coaches actually imported
 
@@ -144,15 +145,33 @@ bundled schema — so a broken asset fails the build rather than a user's run.
 
 ### Schemas & game patches
 
-The CFB27 table layouts this tool reads and writes (coach identity, likeness, and
-career stats) are stable across game patches — three different schema versions
-(468, 472, 809) parse the same save byte-identically. So the tool prefers an exact
-version match but otherwise falls back to the newest bundled schema, and a save
-from a brand-new patch still works.
+Every save records the game build that wrote it, and the tool picks a bundled
+schema to match. Two ship in `schema\`:
 
-If you ever need to force a specific schema, drop a `CFB27_<major>_<minor>.gz` (or
-`C27_<major>_<minor>.gz`) file into the `schema\` folder next to the exe — the
-newest file there is used for any save whose version isn't an exact match.
+| Bundled schema | Covers saves declaring |
+|---|---|
+| `CFB27_472_0.gz` | the release build and the July 2026 patch (809, 814) |
+| `CFB27_833_0.gz` | the **August 2026 patch** (833) and later |
+
+Selection is: exact filename match on the declared version, else the **newest
+bundled schema whose version is at or below** what the save declares.
+
+That "at or below" rule matters, and it is not just tidiness. Through the July
+2026 patch the CFB27 table layouts really were stable across builds, so simply
+using the newest schema was safe. **The August 2026 patch ended that.** The
+`Coach` table — this tool's entire subject — changed layout, and the mismatch
+breaks in *both* directions: the old schema reads zero named coach fields on a
+new save, and the new schema reads zero named coach fields on an old save (the
+parser silently falls back to generic `Field_N` names rather than erroring).
+So a pre-patch save must keep resolving to `472` even though `833` is newer.
+Both directions are verified against real saves of each era: 493 named coaches
+read on both, and 0 when the schemas are deliberately crossed.
+
+A future patch (say 840) resolves to `833` automatically until a newer schema is
+bundled — no code change. If you ever need to force a specific schema, drop a
+`CFB27_<major>_<minor>.gz` (or `C27_<major>_<minor>.gz`) file into `schema\` next
+to the exe; name it for the **save-declared** build number, which is a different
+counter from the version reported inside the schema file itself.
 
 ### Regenerating the dataset (optional)
 

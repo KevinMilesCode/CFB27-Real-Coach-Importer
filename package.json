@@ -1,6 +1,6 @@
 {
   "name": "cfb27-real-coaches",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Standalone tool: correct a CFB27 dynasty save's generic head coaches to their real-life identities (name + likeness + historic career stats).",
   "main": "index.js",

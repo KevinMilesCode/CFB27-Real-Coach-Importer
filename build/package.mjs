@@ -71,12 +71,15 @@ async function preflight() {
   if (gzs.length === 0) throw new Error(`No schema .gz files found in ${schemaDir}.`);
   for (const f of gzs) {
     const meta = await loadSchemaMeta(path.join(schemaDir, f));
-    // openSave.js resolves schemas by CFB27_<major>_<minor>.gz / C27_<major>_<minor>.gz.
-    // Warn if a file's name won't be found by that lookup for its own version.
-    const expected = [`CFB27_${meta.major}_${meta.minor}.gz`, `C27_${meta.major}_${meta.minor}.gz`];
-    const nameOk = expected.includes(f);
-    log(`schema ${f} -> version ${meta.major}_${meta.minor} (loads OK)`
-      + (nameOk ? '' : `  \x1b[33m(WARNING: filename won't be matched at runtime; rename to ${expected[0]})\x1b[0m`));
+    // openSave.js selects on the SAVE-STAMPED version in the filename, which is a
+    // different counter from the schema's own internal dataMajorVersion (833 vs
+    // 486_1) — so we deliberately do NOT require the two to agree. What must hold
+    // is that the filename is visible to the runtime selector at all: it globs
+    // ^CFB27_<digits>_<digits>.gz$ / ^C27_..., which an FTC-tagged or oddly-named
+    // file silently fails, leaving it bundled but never selectable.
+    const selectable = /^(CFB27|C27)_\d+_\d+\.gz$/i.test(f);
+    log(`schema ${f} -> internal version ${meta.major}_${meta.minor} (loads OK)`
+      + (selectable ? '' : `  \x1b[33m(WARNING: filename isn't matched by the runtime selector; it will never be chosen)\x1b[0m`));
   }
 }
 
